@@ -50,7 +50,7 @@ library(openxlsx)
 We read the excel file
 ```{r}
 
-excel_path <- "C:/Users/janss/Documents/TFG_GEB/TO_COMPDB/IROA_Map_Plate.xlsx"
+excel_path <- "IROA_Map_Plate.xlsx"
 excel_file <- read.xlsx(excel_path, sheet = 1)
 
 ```
@@ -59,6 +59,9 @@ excel_file <- read.xlsx(excel_path, sheet = 1)
 trunc_4d <- function(value){
   return(trunc(value*1e4)/1e4)
 }
+
+
+
 
 merge_lists <- function(list1, list2, needs_mean = FALSE) {
   merged_list <- list()
@@ -213,6 +216,11 @@ for (row in 1:nrow(excel_file)) {
     spectrum2_data <- extract_spectrum_data(spec_max_m1)
     spectrum3_data <- extract_spectrum_data(spec_max_p1)
     
+    print(spectrum1_data[["mz.value"]])
+    print(spectrum2_data[["mz.value"]])
+    print(spectrum3_data[["mz.value"]])
+    
+    
     temp<-merge_lists(spectrum1_data,spectrum2_data)
     
     #SET TO TRUE!!!!
@@ -309,125 +317,3 @@ file_path <- "mzml/4_METHYLCATECHOL.mzML"
 measured_comp <- Spectra(file_path, source = MsBackendMzR())
 ```
 
-```{r}
-
-# Ensure the plot window is large enough
-dev.new(width = 10, height = 7)  # Opens a new plotting window with specified size
-
-# Adjust plot margins
-
-combinedasdf<-c(measured_comp[580],measured_comp[581])
-# Plot the spectrum
-plotSpectra(combinedasdf)
-
-```
-
-```{r}
-
-
-spectrum1_data <- extract_spectrum_data(measured_comp[1])
-spectrum2_data <- extract_spectrum_data(measured_comp[2])
-spectrum3_data <- extract_spectrum_data(measured_comp[3])
-
-```
-
-
-
-```{r}
-merge_lists <- function(list1, list2, needs_mean = FALSE) {
-  merged_list <- list()
-  
-  merged_list[["mz.value"]] <- union(list1[["mz.value"]], list2[["mz.value"]])
-  
-  merged_list[["intensity.value"]] <- numeric(length(merged_list[["mz.value"]]))
-  
-  value<-1
-  merged_list[["mz.group"]] <-   list(rep(value, length(merged_list[["mz.value"]])))
-  merged_list[["intensity.group"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
-
-  value<-NA
-  merged_list[["mz.group_name"]] <- list(rep(value, length(merged_list[["mz.value"]])))
-  merged_list[["intensity.group_name"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
-
-  for (i in 1:length(merged_list[["mz.value"]])) {
-    idx1 <- match(merged_list[["mz.value"]][i], list1[["mz.value"]])
-    idx2 <- match(merged_list[["mz.value"]][i], list2[["mz.value"]])
-    if (!is.na(idx1)) {
-      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list1[["intensity.value"]][idx1]
-    }
-    if (!is.na(idx2)) {
-      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list2[["intensity.value"]][idx2]
-    }
-  }
-    
-  merged_list_sorted <- merged_list
-  order_idx <- order(merged_list_sorted[["mz.value"]])
-  merged_list_sorted[["mz.value"]] <- merged_list_sorted[["mz.value"]][order_idx]
-  merged_list_sorted[["intensity.value"]] <- merged_list_sorted[["intensity.value"]][order_idx]
-  
-  
-  
-  if(needs_mean) {
-    merged_list_sorted[["intensity.value"]] <- lapply(merged_list_sorted[["intensity.value"]],function(x) x/3)
-  }
-  merged_list_sorted[["intensity.value"]] <- as.numeric(merged_list_sorted[["intensity.value"]])
-  return(merged_list_sorted)
-}
-
-
-```
-
-```{r}
-
-#final <- merge_three_lists(spectrum1_data,spectrum2_data,spectrum3_data)
-interm <- merge_lists(spectrum1_data,spectrum2_data)
-final <- merge_lists(interm,spectrum3_data,TRUE)
-
-
-spd <- DataFrame(
-    msLevel = c(2L),
-    polarity = c(1L),
-    id = c("HMDB0000001"),
-    name = c("1-Methylhistidine"))
-
-## Assign m/z and intensity values.
-spd$mz <- list(final$mz.value)
-    
-spd$intensity <- list(final$intensity.value)
-    
-
-sps <- Spectra(spd)
-sps
-plotSpectra(sps)
-
-```
-
-
-
-```{r}
-
-final <- merge_three_lists(spectrum1_data,spectrum2_data,spectrum3_data)
-#final <- merge_lists(spectrum1_data,spectrum2_data)
-
-
-spd <- DataFrame(
-    msLevel = c(2L),
-    polarity = c(1L),
-    id = c("HMDB0000001"),
-    name = c("1-Methylhistidine"))
-
-## Assign m/z and intensity values.
-spd$mz <- list(final$mz.value)
-    
-spd$intensity <- list(final$intensity.value)
-    
-
-sps <- Spectra(spd)
-sps
-
-plotSpectra(sps)
-
-
-
-
-```
