@@ -1,0 +1,433 @@
+---
+title: "xzml_to_cmpdb"
+author: "MarcJanssens"
+date: "2024-05-19"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load or install BiocManager
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+
+# Install/update Bioconductor packages
+BiocManager::install(update = TRUE, ask = FALSE)
+
+bioconductor_packages <- c("Spectra", "CompoundDb", "mzR")
+for (pkg in bioconductor_packages) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+        BiocManager::install(pkg)
+    }
+}
+
+# Install CRAN packages
+cran_packages <- c("xlsx", "rJava", "tidyverse", "openxlsx")
+install.packages(cran_packages, dependencies = TRUE)
+
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r library}
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(Spectra)
+library(CompoundDb)
+library(openxlsx)
+
+```
+
+
+We read the excel file
+```{r}
+
+excel_path <- "C:/Users/janss/Documents/TFG_GEB/TO_COMPDB/IROA_Map_Plate.xlsx"
+excel_file <- read.xlsx(excel_path, sheet = 1)
+
+```
+
+```{r}
+trunc_4d <- function(value){
+  return(trunc(value*1e4)/1e4)
+}
+
+merge_lists <- function(list1, list2, needs_mean = FALSE) {
+  merged_list <- list()
+  
+  merged_list[["mz.value"]] <- union(list1[["mz.value"]], list2[["mz.value"]])
+  
+  merged_list[["intensity.value"]] <- numeric(length(merged_list[["mz.value"]]))
+  
+  value<-1
+  merged_list[["mz.group"]] <-   list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
+
+  value<-NA
+  merged_list[["mz.group_name"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group_name"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
+
+  for (i in 1:length(merged_list[["mz.value"]])) {
+    idx1 <- match(merged_list[["mz.value"]][i], list1[["mz.value"]])
+    idx2 <- match(merged_list[["mz.value"]][i], list2[["mz.value"]])
+    if (!is.na(idx1)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list1[["intensity.value"]][idx1]
+    }
+    if (!is.na(idx2)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list2[["intensity.value"]][idx2]
+    }
+  }
+    
+  merged_list_sorted <- merged_list
+  order_idx <- order(merged_list_sorted[["mz.value"]])
+  merged_list_sorted[["mz.value"]] <- merged_list_sorted[["mz.value"]][order_idx]
+  merged_list_sorted[["intensity.value"]] <- merged_list_sorted[["intensity.value"]][order_idx]
+  
+  
+  
+  if(needs_mean) {
+    print('meaned')
+    merged_list_sorted[["intensity.value"]] <- lapply(merged_list_sorted[["intensity.value"]],function(x) x/3)
+  }
+  merged_list_sorted[["intensity.value"]] <- as.numeric(merged_list_sorted[["intensity.value"]])
+  return(merged_list_sorted)
+}
+
+#Not 100% sure if it works, that's why needs_mean on last function is yet needed
+merge_three_lists <- function(list1, list2, list3) {
+  merged_list <- list()
+  
+  # Combine mz.value from all three lists
+  merged_list[["mz.value"]] <- union(union(list1[["mz.value"]], list2[["mz.value"]]), list3[["mz.value"]])
+  
+  # Initialize intensity.value with zeroes
+  merged_list[["intensity.value"]] <- numeric(length(merged_list[["mz.value"]]))
+  
+  # Initialize mz.group and intensity.group with default values (1)
+  value <- 1
+  merged_list[["mz.group"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  
+  # Initialize mz.group_name and intensity.group_name with NA
+  value <- NA
+  merged_list[["mz.group_name"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group_name"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  
+  # Calculate the combined intensity.value from all three lists
+  for (i in 1:length(merged_list[["mz.value"]])) {
+    idx1 <- match(merged_list[["mz.value"]][i], list1[["mz.value"]])
+    idx2 <- match(merged_list[["mz.value"]][i], list2[["mz.value"]])
+    idx3 <- match(merged_list[["mz.value"]][i], list3[["mz.value"]])
+    
+    if (!is.na(idx1)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list1[["intensity.value"]][idx1]
+    }
+    if (!is.na(idx2)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list2[["intensity.value"]][idx2]
+    }
+    if (!is.na(idx3)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list3[["intensity.value"]][idx3]
+    }
+  }
+  
+  # Sort the merged list by mz.value
+  merged_list_sorted <- merged_list
+  order_idx <- order(merged_list_sorted[["mz.value"]])
+  merged_list_sorted[["mz.value"]] <- merged_list_sorted[["mz.value"]][order_idx]
+  merged_list_sorted[["intensity.value"]] <- merged_list_sorted[["intensity.value"]][order_idx]
+  
+  # Adjust intensity.value by dividing by 3
+  merged_list_sorted[["intensity.value"]] <- lapply(merged_list_sorted[["intensity.value"]], function(x) x / 3)
+  merged_list_sorted[["intensity.value"]] <- as.numeric(merged_list_sorted[["intensity.value"]])
+  
+  
+  return(merged_list_sorted)
+}
+
+# Function to extract m/z and intensity data from a Spectra object
+extract_spectrum_data <- function(spectrum) {
+  data.frame(
+    mz = mz(spectrum),
+    intensity = intensity(spectrum)
+  )
+}
+
+
+```
+
+
+We iterate over every line of the excel
+```{r}
+path_mzml<-'mzML/'
+
+for (row in 1:nrow(excel_file)) {
+  
+  # Do stuff
+  
+  #We get the name of the compound
+  comp <- excel_file[row, "Master.List_NAME"]
+  HMDB <- excel_file[row, "HMDB"]
+  # Isolate an example
+  if(comp=="4_METHYLCATECHOL"){
+    xmzl_file <- paste(path_mzml, comp,'.mzML',sep = '')
+    comp_spectra <- Spectra(xmzl_file, source = MsBackendMzR())
+
+    M_H_pos <- (excel_file[row, "[M+H]+"])
+    
+    # Remove NAs in the logical condition
+    logical_condition <- !is.na(comp_spectra@backend@spectraData$precursorMz)
+    # Subset the data based on the cleaned logical condition
+    M_H_pos_df <- as.data.frame(comp_spectra@backend@spectraData[logical_condition,], na.rm = FALSE)
+    M_H_pos_df <-subset(M_H_pos_df, trunc(precursorMz) == trunc(M_H_pos))
+    
+    M_H_pos_10 <- (subset(M_H_pos_df, collisionEnergy == 10))
+
+    #JO HE ENTÈS AIXÒ COMPROVAR SI ESTÀ OKAY
+    max_row <- which.max(M_H_pos_10$basePeakIntensity)
+    max_row_m1 <- max_row-1
+    if(max_row_m1 == 0){
+      mar_row_m1 <-2
+    }
+    max_row_p1 <- max_row+1
+    
+    scan_max <- M_H_pos_10[max_row,"scanIndex"]
+    scan_max_m1 <- M_H_pos_10[max_row_m1,"scanIndex"]
+    scan_max_p1 <- M_H_pos_10[max_row_p1,"scanIndex"]
+
+    spec_max <- comp_spectra[comp_spectra@backend@spectraData$scanIndex == scan_max]
+    spec_max_m1 <- comp_spectra[comp_spectra@backend@spectraData$scanIndex == scan_max_m1]
+    spec_max_p1 <- comp_spectra[comp_spectra@backend@spectraData$scanIndex == scan_max_p1]
+    
+    combined_spectra <- c(spec_max,spec_max_m1,spec_max_p1)
+    plotSpectra(combined_spectra)
+    
+    spectrum1_data <- extract_spectrum_data(spec_max)
+    spectrum2_data <- extract_spectrum_data(spec_max_m1)
+    spectrum3_data <- extract_spectrum_data(spec_max_p1)
+    
+    temp<-merge_lists(spectrum1_data,spectrum2_data)
+    
+    #SET TO TRUE!!!!
+    final <- merge_lists(temp,spectrum3_data, FALSE)
+    
+    spd <- DataFrame(
+    msLevel = c(2L),
+    polarity = c(1L),
+    id = c(HMDB),
+    name = c(comp))
+    
+    ## Assign m/z and intensity values.
+    spd$mz <- list(final$mz.value)
+        
+    spd$intensity <- list(final$intensity.value)
+        
+    
+    sps <- Spectra(spd)
+    
+    
+
+    
+    
+    
+    M_H_neg <- trunc_4d(excel_file[row, "[M-H-]"])
+    M_Na_pos <- trunc_4d(excel_file[row,"[M-Na]+" ])
+    M_NH4_pos <- trunc_4d(excel_file[row, "[M-NH4]+"])
+    M_H_H2O_pos <- trunc_4d(excel_file[row, "[M-H+H20]+"])
+    M_H_H2O_neg <- trunc_4d(excel_file[row, "[M-H-H20]-"])
+    M_K_pos <- trunc_4d(excel_file[row, "[M+K]+"])
+    M_Cl_neg <- trunc_4d(excel_file[row,"[M+Cl]-"])
+    
+
+  }
+  
+  
+  
+}
+
+```
+
+```{r pressure, warning=FALSE}
+
+
+# Get the path to a data file in the Spectra package
+file_path <- "mzml/4_METHYLCATECHOL.mzML"
+#' Creating a Spectra object representing the MS data
+measured_comp <- Spectra(file_path, source = MsBackendMzR())
+
+
+df_showspectra <- as.data.frame(measured_comp@backend@spectraData@listData)
+
+subset_df <- df_showspectra[df_showspectra$collisionEnergy == 10, ]
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r fileList}
+files<-list.files(path = "./mzML", pattern = NULL, all.files = FALSE,
+           full.names = FALSE, recursive = FALSE,
+           ignore.case = FALSE, include.dirs = FALSE, no.. = FALSE)
+for(file in files){
+   print(file)
+}
+ 
+
+```
+
+```{r compdDB creation}
+compare_with_tolerance <- function(num1, num2, tolerance_percent=0.0001) {
+  # Calculate the allowed error margin
+  tolerance_value <- abs(num1) * (tolerance_percent / 100)
+  
+  # Check if the absolute difference is within the tolerance
+  abs(num1 - num2) <= tolerance_value
+}
+```
+
+
+
+
+
+[M+H]+ [M-H-] [M-Na]+ [M-NH4]+ [M-H+H20]+ [M-H-H20]- [M+K]+ [M+Cl]-
+
+```{r}
+# Display basic information about the spectra
+print(measured_comp)
+
+# Get the path to a data file in the Spectra package
+file_path <- "mzml/4_METHYLCATECHOL.mzML"
+#' Creating a Spectra object representing the MS data
+measured_comp <- Spectra(file_path, source = MsBackendMzR())
+```
+
+```{r}
+
+# Ensure the plot window is large enough
+dev.new(width = 10, height = 7)  # Opens a new plotting window with specified size
+
+# Adjust plot margins
+
+combinedasdf<-c(measured_comp[580],measured_comp[581])
+# Plot the spectrum
+plotSpectra(combinedasdf)
+
+```
+
+```{r}
+
+
+spectrum1_data <- extract_spectrum_data(measured_comp[1])
+spectrum2_data <- extract_spectrum_data(measured_comp[2])
+spectrum3_data <- extract_spectrum_data(measured_comp[3])
+
+```
+
+
+
+```{r}
+merge_lists <- function(list1, list2, needs_mean = FALSE) {
+  merged_list <- list()
+  
+  merged_list[["mz.value"]] <- union(list1[["mz.value"]], list2[["mz.value"]])
+  
+  merged_list[["intensity.value"]] <- numeric(length(merged_list[["mz.value"]]))
+  
+  value<-1
+  merged_list[["mz.group"]] <-   list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
+
+  value<-NA
+  merged_list[["mz.group_name"]] <- list(rep(value, length(merged_list[["mz.value"]])))
+  merged_list[["intensity.group_name"]] <-  list(rep(value, length(merged_list[["mz.value"]])))
+
+  for (i in 1:length(merged_list[["mz.value"]])) {
+    idx1 <- match(merged_list[["mz.value"]][i], list1[["mz.value"]])
+    idx2 <- match(merged_list[["mz.value"]][i], list2[["mz.value"]])
+    if (!is.na(idx1)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list1[["intensity.value"]][idx1]
+    }
+    if (!is.na(idx2)) {
+      merged_list[["intensity.value"]][i] <- merged_list[["intensity.value"]][i] + list2[["intensity.value"]][idx2]
+    }
+  }
+    
+  merged_list_sorted <- merged_list
+  order_idx <- order(merged_list_sorted[["mz.value"]])
+  merged_list_sorted[["mz.value"]] <- merged_list_sorted[["mz.value"]][order_idx]
+  merged_list_sorted[["intensity.value"]] <- merged_list_sorted[["intensity.value"]][order_idx]
+  
+  
+  
+  if(needs_mean) {
+    merged_list_sorted[["intensity.value"]] <- lapply(merged_list_sorted[["intensity.value"]],function(x) x/3)
+  }
+  merged_list_sorted[["intensity.value"]] <- as.numeric(merged_list_sorted[["intensity.value"]])
+  return(merged_list_sorted)
+}
+
+
+```
+
+```{r}
+
+#final <- merge_three_lists(spectrum1_data,spectrum2_data,spectrum3_data)
+interm <- merge_lists(spectrum1_data,spectrum2_data)
+final <- merge_lists(interm,spectrum3_data,TRUE)
+
+
+spd <- DataFrame(
+    msLevel = c(2L),
+    polarity = c(1L),
+    id = c("HMDB0000001"),
+    name = c("1-Methylhistidine"))
+
+## Assign m/z and intensity values.
+spd$mz <- list(final$mz.value)
+    
+spd$intensity <- list(final$intensity.value)
+    
+
+sps <- Spectra(spd)
+sps
+plotSpectra(sps)
+
+```
+
+
+
+```{r}
+
+final <- merge_three_lists(spectrum1_data,spectrum2_data,spectrum3_data)
+#final <- merge_lists(spectrum1_data,spectrum2_data)
+
+
+spd <- DataFrame(
+    msLevel = c(2L),
+    polarity = c(1L),
+    id = c("HMDB0000001"),
+    name = c("1-Methylhistidine"))
+
+## Assign m/z and intensity values.
+spd$mz <- list(final$mz.value)
+    
+spd$intensity <- list(final$intensity.value)
+    
+
+sps <- Spectra(spd)
+sps
+
+plotSpectra(sps)
+
+
+
+
+```
