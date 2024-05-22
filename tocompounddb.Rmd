@@ -166,9 +166,18 @@ extract_spectrum_data <- function(spectrum) {
 
 ```
 
+```{r}
+metad <- make_metadata(source = "manually defined", url = "",
+                       source_version = "1.0.0", source_date = "2024-05-22",
+                       organism = NA_character_)
 
+    db_file <- createCompDb(cmps, metadata = metad, path = tempdir(),
+                            dbFile = "CompoundsDB_marc_22_5")
+```
 We iterate over every line of the excel
 ```{r}
+
+
 path_mzml<-'mzML/'
 
 for (row in 1:nrow(excel_file)) {
@@ -220,17 +229,19 @@ for (row in 1:nrow(excel_file)) {
     print(spectrum2_data[["mz.value"]])
     print(spectrum3_data[["mz.value"]])
     
-    
+    #We merge the first two lists without doing the mean
     temp<-merge_lists(spectrum1_data,spectrum2_data)
+    
+    # Then we merge the one with two and add the second one, but we do the mean x/3 as there are 3 merges
     
     #SET TO TRUE!!!!
     final <- merge_lists(temp,spectrum3_data, FALSE)
     
     spd <- DataFrame(
-    msLevel = c(2L),
-    polarity = c(1L),
-    id = c(HMDB),
-    name = c(comp))
+        msLevel = c(2L),
+        polarity = c(1L),
+        id = c(HMDB),
+        name = c(comp))
     
     ## Assign m/z and intensity values.
     spd$mz <- list(final$mz.value)
@@ -239,11 +250,28 @@ for (row in 1:nrow(excel_file)) {
         
     
     sps <- Spectra(spd)
+    sps$compound_id <- c(HMDB)
+    
+    
+    cmps <- data.frame(
+        compound_id = c(HMDB),
+        name = c(comp),
+        inchi = NA_character_,
+        inchikey = NA_character_,
+        formula = NA_character_,
+        exactmass = c(M_H_pos),
+        compound_group = c("G01")
+    )
+    
+    cmps$synonyms <- list(
+        c()
+    )
     
     
 
-    
-    
+    cdb <- CompDb(db_file, flags = RSQLite::SQLITE_RW)
+    cdb <- insertSpectra(cdb, spectra = sps,
+                         columns = c("compound_id", "msLevel","precursorMz"))
     
     M_H_neg <- trunc_4d(excel_file[row, "[M-H-]"])
     M_Na_pos <- trunc_4d(excel_file[row,"[M-Na]+" ])
@@ -315,5 +343,12 @@ print(measured_comp)
 file_path <- "mzml/4_METHYLCATECHOL.mzML"
 #' Creating a Spectra object representing the MS data
 measured_comp <- Spectra(file_path, source = MsBackendMzR())
+```
+
+
+```{r}
+
+sessionInfo()
+
 ```
 
